@@ -1,5 +1,14 @@
-from components import Job, Scheduler
+import logging
+
 import requests
+
+from components import Job, Scheduler
+
+
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+
+
 
 image_urls = [
     'https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png',
@@ -8,25 +17,29 @@ image_urls = [
 ]
 
 
-def download_images(urls: list[str]) -> list[bytes]:
-    for url in urls:
-        response = requests.get(url)
-        name = url.split('/')[-1]
-        with open(f'{name}', 'wb') as f:
-            f.write(response.content)
-        print(f'Downloaded {name}')
-        yield
-        
-def print_numbers():
-    for i in range(10):
-        print(i)
-        yield
+def download_image(url: str):
+    response = requests.get(url)
+    name = url.split('/')[-1]
+    return name, response.content
+
+def save_image(name: str, content: bytes):
+    with open(f'images/{name}', 'wb') as f:
+        f.write(content)
+    return name
+
+def print_result(name: str):
+    print(f'Image {name} was saved')
 
 
 
 if __name__ == '__main__':
     scheduler = Scheduler()
-    # scheduler.schedule(Job(download_images, args=(image_urls,)))
-    scheduler.schedule(Job(print_numbers))
+    for url in image_urls:
+        job = Job(download_image, url=url)
+        next_job = Job(print_result, name=job, dependencies=[job])
+        scheduler.schedule(job)
+        scheduler.schedule(next_job)
+        
+    
     scheduler.run()
 
