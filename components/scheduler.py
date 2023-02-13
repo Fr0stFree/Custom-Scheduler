@@ -1,7 +1,8 @@
 import time
 import logging
+import threading
 
-from .utils import coroutine
+from .utils import coroutine, Singleton, register_event_handler, dispatch
 from .job import Job
 from components.exceptions import *
 
@@ -9,62 +10,61 @@ from components.exceptions import *
 logger = logging.getLogger(__name__)
 
 
-class Scheduler:
+class Scheduler(metaclass=Singleton):
     def __init__(self, pool_size=10):
-        self._queue = []
-        self._storage = []
+        self._pending = []
+        self._running = {}
+        self._completed = {}
         self._pool_size = pool_size
-        self._running = True
-        self._validator = self._validator()
         self._executor = self._executor()
-        self._planner = self._planner()
-        
-    def schedule(self, task) -> None:
-        if len(self._queue) >= self._pool_size:
-            raise ValueError('Queue is full')
-        self._planner.send(task)
     
-    @coroutine
-    def _planner(self):
-        while True:
-            job = yield
-            if not self._queue:
-                self._queue.append(job)
-            else:
-                for i, task in enumerate(self._queue):
-                    if job < task:
-                        self._queue.insert(i, job)
-                        break
-                else:
-                    self._queue.append(job)
+    def schedule(self, *tasks) -> None:
+        for task in tasks:
+            if len(self._pending) + len(self._running) >= self._pool_size:
+                raise ValueError('Queue is full')
 
+            task.scheduler = self
+            for i, job in enumerate(self._pending):
+                if task < job:
+                    self._pending.insert(i, task)
+                    break
+            else:
+                self._pending.append(task)
+            dispatch('on_job_scheduled', self, task=task, position=self._pending.index(task))
+    
+    @register_event_handler('on_job_done')
+    def job_done(self, job):
+        self._running.pop(job.id)
+        self._completed[job.id] = job
+        
+        for other_job in self._pending + list(self._running.values()):
+            if job in other_job.dependencies:
+                other_job.dependencies.remove(job)
+                if not other_job.dependencies:
+                    other_job.dependency_event.set()
+        
+    
+    @register_event_handler('on_job_failed')
+    def job_failed(self, job):
+        self._running.pop(job.id)
+        if job.tries > 0:
+            job.restart()
+            self.schedule(job)
+            return
+        
+        self._completed[job.id] = job
+        for other_job in self._pending + list(self._running.values()):
+            if job in other_job.dependencies:
+                other_job.failed(error=JobDependencyHasFailed(job))
+                
     def run(self):
-        while self._running:
+        dispatch('on_scheduler_started', self)
+        while True:
             try:
-                job = self._queue.pop(0)
+                job = self._pending.pop(0)
             except IndexError:
                 print('Queue is empty')
                 time.sleep(1)
-            else:
-                self._validator.send(job)
-    
-    @coroutine
-    def _validator(self):
-        while True:
-            job = yield
-            if not job.has_tries:
-                logger.warning('Job %s has no more tries', job)
-                self._storage.append(job)
-            elif job.start_at > dt.datetime.now():
-                logger.info('Job %s is not ready yo run yet', job)
-                self._planner.send(job)
-            elif not all([task.status == Job.Status.DONE for task in job.dependencies]):
-                logger.info('Job %s has uncompleted dependencies', job)
-                self._planner.send(job)
-            elif job.max_working_time > dt.datetime.now() - job.start_at:
-                logger.warning('Job %s exceeded max working time', job)
-                job.failed(error=JobExceededMaxWorkingTime())
-                self._storage.append(job)
             else:
                 self._executor.send(job)
     
@@ -72,26 +72,25 @@ class Scheduler:
     def _executor(self):
         while True:
             job = yield
-            job.run()
-            match job.status:
-                case Job.Status.DONE:
-                    logger.info('Job %s is done. Result: %s', job, job.result)
-                    self._storage.append(job)
-                case Job.Status.FAILED:
-                    job.restart()
-                    self._validator.send(job)
-                case Job.Status.PENDING:
-                    self._planner.send(job)
-                
-                    
-                    
-                
-        
-        
+            
+            if job.dependencies:
+                job.dependency_event = threading.Event()
+            
+            if job.start_at > dt.datetime.now():
+                thread = threading.Timer(interval=job.start_at.timestamp() - time.time(),
+                                         function=job.run)
+            else:
+                thread = threading.Thread(target=job.run)
 
+            thread.start()
+            self._running[job.id] = job
+            
+                    
+    def stop(self):
+        pass
+        
 
     def restart(self):
         pass
 
-    def stop(self):
-        pass
+
