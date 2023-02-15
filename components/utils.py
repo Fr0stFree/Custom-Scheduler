@@ -1,5 +1,7 @@
 EVENTS = {
     'on_scheduler_started': set(),
+    'on_scheduler_starting': set(),
+    'on_scheduler_stopping': set(),
     'on_scheduler_stopped': set(),
     'on_job_scheduled': set(),
     'on_job_started': set(),
@@ -25,7 +27,7 @@ def coroutine(func):
     return wrapper
 
 
-def register_event_handler(event):
+def subscribe(event):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
             return func(self, *args, **kwargs)

@@ -106,6 +106,11 @@ class Job:
         logger.debug('Job %s set to failed', self)
         self._status = self.Status.FAILED
         self._error = error
+
+    def stop(self):
+        self._status = self.Status.PENDING
+        self._result = None
+        self._error = None
     
     def __repr__(self):
         return f'<Job: {self._id}, {self._func.__name__}, {self._status.name}>'
