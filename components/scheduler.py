@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 import threading
@@ -102,6 +103,7 @@ class Scheduler(metaclass=Singleton):
     def load(cls):
         with open('scheduler.pickle', 'rb') as f:
             scheduler = pickle.load(f)
+        os.remove('scheduler.pickle')
         scheduler._executor = scheduler._executor()
         scheduler._is_active = True
         return scheduler

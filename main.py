@@ -3,17 +3,10 @@ import logging
 import requests
 
 from components import Job, Scheduler
-
+from test_tasks.downloading import download_image
 
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger('urllib3').setLevel(logging.WARNING)
-
-
-
-def download_image(url: str):
-    response = requests.get(url)
-    name = url.split('/')[-1]
-    return name, response.content
 
 
 if __name__ == '__main__':
