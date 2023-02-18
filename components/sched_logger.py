@@ -1,15 +1,13 @@
 import logging
 
 from .utils import subscribe
-from .scheduler import Scheduler
-from .job import Job
 
 
 logger = logging.getLogger(__name__)
 
 
 @subscribe('on_scheduler_started')
-def scheduler_started(*args, **kwargs):
+def scheduler_started(*args):
     scheduler = args[0]
     logger.debug('Scheduler has started. Current queue: %s, max size: %s',
                  len(scheduler._pending), scheduler._pool_size)

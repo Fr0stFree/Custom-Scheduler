@@ -1,19 +1,19 @@
-import os
-import time
+import datetime as dt
 import logging
-import threading
-
+import os
 import pickle
+import threading
+import time
 
+from .exceptions import JobDependencyHasFailed
 from .utils import coroutine, Singleton, subscribe, dispatch
-from components.exceptions import *
 
 
 logger = logging.getLogger(__name__)
 
 
 class Scheduler(metaclass=Singleton):
-    def __init__(self, pool_size=10):
+    def __init__(self, pool_size: int = 10):
         self._pending = []
         self._running = {}
         self._completed = {}
@@ -38,10 +38,11 @@ class Scheduler(metaclass=Singleton):
     @subscribe('on_job_done')
     def job_done(self, job):
         self._running.pop(job.id)
-        self._completed[job.id] = job
+        self._completed[job.id] = job.result
 
         for other_job in self._pending + list(self._running.values()):
             if job in other_job.dependencies:
+                print(other_job.dependencies)
                 other_job.dependencies.remove(job)
                 if not other_job.dependencies:
                     other_job.dependency_event.set()
@@ -54,10 +55,11 @@ class Scheduler(metaclass=Singleton):
             self.schedule(job)
             return
 
-        self._completed[job.id] = job
+        self._completed[job.id] = job.error
         for other_job in self._pending + list(self._running.values()):
             if job in other_job.dependencies:
                 other_job.failed(error=JobDependencyHasFailed(job))
+                other_job.dependency_event.set()
 
     def run(self):
         dispatch('on_scheduler_started', self)
@@ -65,18 +67,18 @@ class Scheduler(metaclass=Singleton):
             try:
                 job = self._pending.pop(0)
             except IndexError:
-                print('Queue is empty')
                 time.sleep(1)
+                if not any([self._pending, self._running]):
+                    self.stop()
+                
             else:
                 self._executor.send(job)
+                time.sleep(.1)
 
     @coroutine
     def _executor(self):
         while True:
             job = yield
-
-            if job.dependencies:
-                job.dependency_event = threading.Event()
 
             if job.start_at > dt.datetime.now():
                 thread = threading.Timer(interval=job.start_at.timestamp() - time.time(),
@@ -84,8 +86,8 @@ class Scheduler(metaclass=Singleton):
             else:
                 thread = threading.Thread(target=job.run)
 
-            thread.start()
             self._running[job.id] = job
+            thread.start()
 
     def stop(self):
         dispatch('on_scheduler_stopping', self)
@@ -107,8 +109,3 @@ class Scheduler(metaclass=Singleton):
         scheduler._executor = scheduler._executor()
         scheduler._is_active = True
         return scheduler
-
-    def restart(self):
-        pass
-
-
